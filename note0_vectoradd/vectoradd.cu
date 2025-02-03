@@ -3,7 +3,7 @@
 #include <cuda_runtime.h>
 #include <time.h>
 
-typedef float FLOAT;
+
 
 // 检查CUDA错误的辅助函数
 #define CHECK_CUDA_ERROR(call) \
@@ -15,31 +15,28 @@ typedef float FLOAT;
         } \
     } while (0)
 
-__global__ void vec_add(FLOAT *x, FLOAT *y, FLOAT *z, int N)
+__global__ void vec_add(float *x, float *y, float *z, int N)
 {
-    /* 2D grid */
-    // int idx = (blockDim.x * (blockIdx.x + blockIdx.y * gridDim.x) + threadIdx.x);
-    /* 1D grid */
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
     if (idx < N) z[idx] = y[idx] + x[idx];
 }
 
-void vec_add_cpu(FLOAT *x, FLOAT *y, FLOAT *z, int N)
+void vec_add_cpu(float *x, float *y, float *z, int N)
 {
     for (int i = 0; i < N; i++) z[i] = y[i] + x[i];
 }
 
 // 初始化数据为随机数
-void initialize_data(FLOAT *x, FLOAT *y, int N) {
+void initialize_data(float *x, float *y, int N) {
     srand(time(NULL));  // 设置随机数种子
     for (int i = 0; i < N; i++) {
-        x[i] = (FLOAT)(rand() % 1000) / 100.0f;  // 生成0到10之间的随机浮点数
-        y[i] = (FLOAT)(rand() % 1000) / 100.0f;
+        x[i] = (float)(rand() % 1000) / 100.0f;  // 生成0到10之间的随机浮点数
+        y[i] = (float)(rand() % 1000) / 100.0f;
     }
 }
 
 // 验证结果
-bool verify_results(FLOAT *gpu_result, FLOAT *cpu_result, int N) {
+bool verify_results(float *gpu_result, float *cpu_result, int N) {
     for (int i = 0; i < N; i++) {
         if (fabs(cpu_result[i] - gpu_result[i]) > 1e-6) {
             printf("Result verification failed at element %d!\n", i);
@@ -50,7 +47,7 @@ bool verify_results(FLOAT *gpu_result, FLOAT *cpu_result, int N) {
 }
 
 // 资源清理
-void cleanup(FLOAT *dx, FLOAT *dy, FLOAT *dz, FLOAT *hx, FLOAT *hy, FLOAT *hz, FLOAT *hz_cpu) {
+void cleanup(float *dx, float *dy, float *dz, float *hx, float *hy, float *hz, float *hz_cpu) {
     // 释放GPU内存
     if (dx) cudaFree(dx);
     if (dy) cudaFree(dy);
@@ -66,15 +63,15 @@ void cleanup(FLOAT *dx, FLOAT *dy, FLOAT *dz, FLOAT *hx, FLOAT *hy, FLOAT *hz, F
 int main()
 {
     int N = 10000;
-    int nbytes = N * sizeof(FLOAT);
+    int nbytes = N * sizeof(float);
     int bs = 256;  // block size
 
     int s = ceil((N + bs - 1.) / bs);
     dim3 grid(s);
 
     // 声明指针
-    FLOAT *dx = NULL, *dy = NULL, *dz = NULL;  // GPU
-    FLOAT *hx = NULL, *hy = NULL, *hz = NULL, *hz_cpu_res = NULL;  // CPU
+    float *dx = NULL, *dy = NULL, *dz = NULL;  // GPU
+    float *hx = NULL, *hy = NULL, *hz = NULL, *hz_cpu_res = NULL;  // CPU
 
     // 分配GPU内存
     CHECK_CUDA_ERROR(cudaMalloc((void **)&dx, nbytes));
@@ -82,10 +79,10 @@ int main()
     CHECK_CUDA_ERROR(cudaMalloc((void **)&dz, nbytes));
 
     // 分配CPU内存
-    hx = (FLOAT *)malloc(nbytes);
-    hy = (FLOAT *)malloc(nbytes);
-    hz = (FLOAT *)malloc(nbytes);
-    hz_cpu_res = (FLOAT *)malloc(nbytes);
+    hx = (float *)malloc(nbytes);
+    hy = (float *)malloc(nbytes);
+    hz = (float *)malloc(nbytes);
+    hz_cpu_res = (float *)malloc(nbytes);
     
     if (!hx || !hy || !hz || !hz_cpu_res) {
         printf("CPU Memory allocation failed!\n");
