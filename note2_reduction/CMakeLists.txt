@@ -1,0 +1,1 @@
+add_executable(reduction_base reduction_base.cu)

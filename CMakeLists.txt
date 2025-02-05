@@ -12,6 +12,7 @@ endif()
 
 project(CudaNote CUDA CXX)
 
+find_package(GTest REQUIRED)
 
 
 # CUDA设置
@@ -24,4 +25,5 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3")
 
 # 添加子目录
 add_subdirectory(note0_vectoradd)
+add_subdirectory(note2_reduction)
 enable_testing()
