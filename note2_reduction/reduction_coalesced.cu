@@ -14,51 +14,48 @@
         } \
     } while (0)
 
+// 模板化的GPU Kernel
 // 假设输入数组：{1,2,3,4,5,6,7,8}
-// 使用2个块(block)，每个块4个线程，blockSize=4
+// 使用2个块(block)，每个块2个线程，blockSize=2
+// 注意：每个线程处理2个数据，所以每个块的2个线程可以处理4个数
 template<typename T, int blockSize>
-__global__ void reduce_smem(T *d_in, T *d_out, int N) {
+__global__ void reduce_coalesced(T *d_in, T *d_out, int N) {
     __shared__ T smem[blockSize];
     
     int tid = threadIdx.x;
-    int gtid = blockIdx.x * blockSize + threadIdx.x;
+    // 修改：因为每个线程处理2个数据，所以步长要乘2
+    int gtid = blockIdx.x * (blockSize * 2) + threadIdx.x;
     
-    /* 第一步：加载数据到共享内存
+    /* 第一步：加载数据到共享内存并完成第一次规约
     块0的线程加载情况：
-    - 线程0(tid=0, gtid=0): smem[0] = d_in[0] = 1
-    - 线程1(tid=1, gtid=1): smem[1] = d_in[1] = 2
-    - 线程2(tid=2, gtid=2): smem[2] = d_in[2] = 3
-    - 线程3(tid=3, gtid=3): smem[3] = d_in[3] = 4
+    - 线程0(tid=0, gtid=0): 
+    smem[0] = d_in[0] + d_in[2] = 1 + 3 = 4
+    - 线程1(tid=1, gtid=1): 
+    smem[1] = d_in[1] + d_in[3] = 2 + 4 = 6
     
     块1的线程加载情况：
-    - 线程0(tid=0, gtid=4): smem[0] = d_in[4] = 5
-    - 线程1(tid=1, gtid=5): smem[1] = d_in[5] = 6
-    - 线程2(tid=2, gtid=6): smem[2] = d_in[6] = 7
-    - 线程3(tid=3, gtid=7): smem[3] = d_in[7] = 8
+    - 线程0(tid=0, gtid=4): 
+    smem[0] = d_in[4] + d_in[6] = 5 + 7 = 12
+    - 线程1(tid=1, gtid=5): 
+    smem[1] = d_in[5] + d_in[7] = 6 + 8 = 14
     */
-    smem[tid] = (gtid < N) ? d_in[gtid] : T(0);
+    if (gtid + blockSize < N) {
+        smem[tid] = d_in[gtid] + d_in[gtid + blockSize];
+    } else {
+        smem[tid] = (gtid < N) ? d_in[gtid] : T(0);
+    }
     __syncthreads();
     
     /* 第二步：规约计算
     块0的计算过程：
-    第1轮(stride=2)：
-    - 线程0: smem[0] += smem[2]  // 1 + 3 = 4
-    - 线程1: smem[1] += smem[3]  // 2 + 4 = 6
-    smem现在是：[4,6,3,4]
-    
-    第2轮(stride=1)：
+    第1轮(stride=1)：
     - 线程0: smem[0] += smem[1]  // 4 + 6 = 10
-    smem现在是：[10,6,3,4]
+    smem现在是：[10,6]
     
     块1的计算过程：
-    第1轮(stride=2)：
-    - 线程0: smem[0] += smem[2]  // 5 + 7 = 12
-    - 线程1: smem[1] += smem[3]  // 6 + 8 = 14
-    smem现在是：[12,14,7,8]
-    
-    第2轮(stride=1)：
+    第1轮(stride=1)：
     - 线程0: smem[0] += smem[1]  // 12 + 14 = 26
-    smem现在是：[26,14,7,8]
+    smem现在是：[26,14]
     */
     for(int stride = blockSize/2; stride > 0; stride >>= 1) {
         if (tid < stride) {
@@ -145,7 +142,7 @@ void cleanup(T *d_in, T *d_out, T *h_in, T *h_out, T *h_cpu_out) {
 template<typename T>
 void run_reduction(int N) {
     const int blockSize = 256;
-    int gridSize = (N + blockSize - 1) / blockSize;
+    int gridSize = (N + blockSize - 1) / blockSize / 2;
     size_t nbytes = N * sizeof(T);
     size_t out_nbytes = gridSize * sizeof(T);
 
@@ -182,7 +179,7 @@ void run_reduction(int N) {
     CHECK_CUDA_ERROR(cudaEventRecord(start));
     
     // 调用kernel
-    reduce_smem<T, blockSize><<<gridSize, blockSize>>>(d_in, d_out, N);
+    reduce_coalesced<T, blockSize><<<gridSize, blockSize>>>(d_in, d_out, N);
     
     CHECK_CUDA_ERROR(cudaEventRecord(stop));
     CHECK_CUDA_ERROR(cudaEventSynchronize(stop));
