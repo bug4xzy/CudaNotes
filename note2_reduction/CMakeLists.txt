@@ -1,3 +1,5 @@
 add_executable(reduction_base reduction_base.cu)
 add_executable(reduction_smem reduction_smem.cu)
 add_executable(reduction_coalesced reduction_coalesced.cu)
+add_executable(reduction_warpseme reduction_warpseme.cu)
+add_executable(reduction_warplevel reduction_warplevel.cu)
