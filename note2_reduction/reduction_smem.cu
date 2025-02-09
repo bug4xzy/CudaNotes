@@ -14,48 +14,33 @@
         } \
     } while (0)
 
-// GPU Kernel
+// GPU Kernel - 使用共享内存的简单规约
 template<typename T, int blockSize>
-__global__ void reduce_base(T *d_in, T *d_out, int N) {
-    __shared__ T sdata[blockSize];
+__global__ void reduce_smem(T *d_in, T *d_out, int N) {
+    __shared__ T smem[blockSize];
+    
     int tid = threadIdx.x;
-    int globalIdx = blockDim.x * blockIdx.x + threadIdx.x;
+    int gtid = blockIdx.x * blockSize + threadIdx.x;
     
-    // 使用Kahan求和算法的局部累加
-    T sum = T(0);
-    T c = T(0);
-    
-    // 每个线程处理多个元素
-    for(int i = globalIdx; i < N; i += blockDim.x * gridDim.x) {
-        T y = d_in[i] - c;
-        T t = sum + y;
-        c = (t - sum) - y;
-        sum = t;
-    }
-    
-    // 加载局部和到共享内存
-    sdata[tid] = sum;
+    // 加载数据到共享内存
+    smem[tid] = (gtid < N) ? d_in[gtid] : T(0);
     __syncthreads();
     
-    // 在共享内存中进行规约
-    for(int s = blockDim.x/2; s > 0; s >>= 1) {
-        if(tid < s) {
-            // 对共享内存中的数据进行Kahan求和
-            T y = sdata[tid + s] - c;
-            T t = sdata[tid] + y;
-            c = (t - sdata[tid]) - y;
-            sdata[tid] = t;
+    // 规约计算
+    for(int stride = blockSize/2; stride > 0; stride >>= 1) {
+        if (tid < stride) {
+            smem[tid] += smem[tid + stride];
         }
         __syncthreads();
     }
     
-    // 将每个block的结果写入全局内存
-    if(tid == 0) {
-        d_out[blockIdx.x] = sdata[0];
+    // 存储结果
+    if (tid == 0) {
+        d_out[blockIdx.x] = smem[0];
     }
 }
 
-// CPU规约函数
+// CPU端的Kahan求和
 template<typename T>
 void reduce_sum_cpu_kahan(T *x, T *out, int N) {
     T sum = T(0);
@@ -71,7 +56,7 @@ void reduce_sum_cpu_kahan(T *x, T *out, int N) {
     out[0] = sum;
 }
 
-// 最终规约函数
+// CPU端的Kahan求和用于最终规约
 template<typename T>
 T final_reduction_kahan(T *partial_sums, int size) {
     T sum = T(0);
@@ -87,7 +72,7 @@ T final_reduction_kahan(T *partial_sums, int size) {
     return sum;
 }
 
-// 数据初始化函数
+// 数据初始化
 template<typename T>
 void initialize_data(T *x, int N) {
     srand(time(NULL));
@@ -96,7 +81,7 @@ void initialize_data(T *x, int N) {
     }
 }
 
-// 结果验证函数
+// 结果验证
 template<typename T>
 bool verify_results(T *gpu_result, T *cpu_result, int N) {
     T relative_error = std::abs(cpu_result[0] - gpu_result[0]) / cpu_result[0];
@@ -108,7 +93,7 @@ bool verify_results(T *gpu_result, T *cpu_result, int N) {
     return true;
 }
 
-// 资源清理函数
+// 资源清理
 template<typename T>
 void cleanup(T *d_in, T *d_out, T *h_in, T *h_out, T *h_cpu_out) {
     if (d_in) cudaFree(d_in);
@@ -147,9 +132,8 @@ void run_reduction(int N) {
     // 初始化数据
     initialize_data(h_in, N);
 
-    // 复制数据到GPU并初始化输出数组
+    // 复制数据到GPU
     CHECK_CUDA_ERROR(cudaMemcpy(d_in, h_in, nbytes, cudaMemcpyHostToDevice));
-    CHECK_CUDA_ERROR(cudaMemset(d_out, 0, out_nbytes));
 
     // GPU计时
     cudaEvent_t start, stop;
@@ -160,7 +144,7 @@ void run_reduction(int N) {
     CHECK_CUDA_ERROR(cudaEventRecord(start));
     
     // 调用kernel
-    reduce_base<T, blockSize><<<gridSize, blockSize>>>(d_in, d_out, N);
+    reduce_smem<T, blockSize><<<gridSize, blockSize>>>(d_in, d_out, N);
     
     CHECK_CUDA_ERROR(cudaEventRecord(stop));
     CHECK_CUDA_ERROR(cudaEventSynchronize(stop));
@@ -175,7 +159,7 @@ void run_reduction(int N) {
     // CPU计算参考结果
     reduce_sum_cpu_kahan(h_in, h_cpu_out, N);
 
-    // 使用Kahan求和算法对block结果进行最终规约
+    // 使用Kahan求和进行最终规约
     T final_sum = T(0);
     T c = T(0);
     for(int i = 0; i < gridSize; i++) {
